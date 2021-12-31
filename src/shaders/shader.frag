@@ -21,40 +21,56 @@ layout(set = 0, binding = 3) uniform Uniforms {
 };
 
 void main() {
-    // vec3 color = texture(sampler2D(tex, tex_sampler), tex_coords).rgb;
-    // color *= 0.99;
+    vec3 color = texture(sampler2D(tex, tex_sampler), tex_coords).rgb;
+    color *= 0.99;
     
+    // get the corresponding world position
     vec2 position = tex_coords;
     position.y = 1.0 - position.y;
     position -= 0.5;
-    // position *= vec2(width, height);
+    position *= vec2(width, height);
 
-    // vec3 sum = vec3(0.0);
+    float hwidth = width * 0.5;
+    float hheight = height * 0.5;
 
-    // float hwidth = width * 0.5;
-    // float hheight = height * 0.5;
+    // check if a particle is on the pixel 
+    bool has_particle = false;
+    for (uint i = 0; i < particle_count; i++) {
+        vec2 particle_position = positions[i];
+        vec2 diff = abs(position - particle_position);
 
-    // // todo: use sorted pixels
-    // for (uint i = 0; i < particle_count; i++) {
-    //     vec2 particle_position = positions[i];
-    //     vec2 diff = abs(position - particle_position);
+        if (length(diff) < 1.0) {
+            has_particle = true;
+            break;
+        }
+    }
 
-    //     if (length(diff) < 1.0) {
-    //         vec2 pixel_position = particle_position / vec2(hwidth, hheight);
-    //         pixel_position += 0.5;
-    //         sum += texture(sampler2D(tex, tex_sampler), pixel_position).rgb;
-    //         color = vec3(1.0);
-    //     }
-    // }
+    if (has_particle) {
+        // make position nonnegative
+        position += vec2(hwidth, hheight);
 
-    // float avg = (sum.r + sum.g + sum.b) / 3.0;
-    // if (avg > threshold) {
-    //     color = vec3(1.0);
-    // }
+        // sum neighboring pixels
+        vec3 sum = vec3(0.0);
+        for (int x = -1; x < 2; x++) {
+            for (int y = -1; y < 2; y++) {
+                vec2 coord = position + vec2(x, y);
+                coord /= vec2(width, height);
+                sum += texture(sampler2D(tex, tex_sampler), coord).rgb;
+            }
+        }
 
-    vec2 particle_position = positions[0] / vec2(width * 0.5, height * 0.5);
-    // particle_position += 0.5;
+        // if average is above threshold then add to aggregate
+        float avg = (sum.r + sum.g + sum.b) / 3.0;
+        if (avg > threshold) {
+            color = vec3(1.0);
+        }
+    } else {
+        vec2 particle_position = positions[0] / vec2(width * 0.5, height * 0.5);
+        particle_position += 0.5;
 
-    float d = distance(position, particle_position);
-    f_color = vec4(d);
+        float d = distance(position, particle_position);
+        f_color = vec4(d);
+    }
+
+    f_color = vec4(color, 1.0);
 }
