@@ -19,7 +19,6 @@ struct Model {
     bind_group: wgpu::BindGroup,
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
-    ran: bool,
 }
 
 struct Compute {
@@ -165,7 +164,8 @@ fn model(app: &App) -> Model {
 
     // Create the bind group and pipeline.
     println!("creating compute bind group layout");
-    let compute_bind_group_layout = create_compute_bind_group_layout(device);
+    let compute_bind_group_layout =
+        create_compute_bind_group_layout(device, uniform_texture_view.component_type());
     println!("creating compute bind group");
     let compute_bind_group = create_compute_bind_group(
         device,
@@ -173,6 +173,8 @@ fn model(app: &App) -> Model {
         &position_buffer,
         &velocity_buffer,
         buffer_size,
+        &uniform_texture_view,
+        &sampler,
         &uniform_buffer,
     );
     println!("creating compute pipeline layout");
@@ -230,6 +232,7 @@ fn model(app: &App) -> Model {
     // NOTE: It is essential that the commands for capturing the snapshot are `submit`ted before we
     // attempt to read the snapshot - otherwise we will read a blank texture!
     // Make sure the directory where we will save images to exists.
+    println!("saving first frame");
     std::fs::create_dir_all(&capture_directory(app)).unwrap();
     let path = capture_directory(app).join("0").with_extension("png");
     snapshot
@@ -266,67 +269,19 @@ fn model(app: &App) -> Model {
         bind_group,
         render_pipeline,
         vertex_buffer,
-        ran: false,
     }
 }
 
 fn update(app: &App, model: &mut Model, _update: Update) {
-    if model.ran {
-        return;
-    }
-
-    model.ran = true;
-
     let window = app.main_window();
     let device = window.swap_chain_device();
-
-    // An update for the uniform buffer with the current time.
-    let uniforms = create_uniforms(app.time);
-    let std140_uniforms = uniforms.std140();
-    let uniforms_bytes = std140_uniforms.as_raw();
-    let uniforms_size = uniforms_bytes.len();
-    let new_uniform_buffer =
-        device.create_buffer_with_data(uniforms_bytes, wgpu::BufferUsage::COPY_SRC);
+    let texture_view = model.app_texture.view().build();
 
     // The encoder we'll use to encode the compute pass and render pass.
     let desc = wgpu::CommandEncoderDescriptor {
         label: Some("encoder"),
     };
     let mut encoder = device.create_command_encoder(&desc);
-
-    let compute = &mut model.compute;
-
-    encoder.copy_buffer_to_buffer(
-        &new_uniform_buffer,
-        0,
-        &compute.uniform_buffer,
-        0,
-        uniforms_size as u64,
-    );
-
-    // create a buffer for reading the particle positions
-    let read_position_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("read-positions"),
-        size: compute.buffer_size,
-        usage: wgpu::BufferUsage::MAP_READ | wgpu::BufferUsage::COPY_DST,
-    });
-
-    {
-        let mut cpass = encoder.begin_compute_pass();
-        cpass.set_pipeline(&compute.pipeline);
-        cpass.set_bind_group(0, &compute.bind_group, &[]);
-        cpass.dispatch(PARTICLE_COUNT, 1, 1);
-    }
-
-    encoder.copy_buffer_to_buffer(
-        &compute.position_buffer,
-        0,
-        &read_position_buffer,
-        0,
-        compute.buffer_size,
-    );
-
-    let texture_view = model.app_texture.view().build();
 
     {
         let mut render_pass = wgpu::RenderPassBuilder::new()
@@ -341,7 +296,6 @@ fn update(app: &App, model: &mut Model, _update: Update) {
     }
 
     // copy app texture to uniform texture
-    println!("copying app texture to buffer");
     copy_texture(&mut encoder, &model.app_texture, &model.uniform_texture);
 
     // Take a snapshot of the texture. The capturer will do the following:
@@ -353,8 +307,47 @@ fn update(app: &App, model: &mut Model, _update: Update) {
         .texture_capturer
         .capture(device, &mut encoder, &model.uniform_texture);
 
+    let compute = &mut model.compute;
+
+    // An update for the uniform buffer with the current time.
+    let uniforms = create_uniforms(app.time);
+    let std140_uniforms = uniforms.std140();
+    let uniforms_bytes = std140_uniforms.as_raw();
+    let uniforms_size = uniforms_bytes.len();
+    let new_uniform_buffer =
+        device.create_buffer_with_data(uniforms_bytes, wgpu::BufferUsage::COPY_SRC);
+
+    encoder.copy_buffer_to_buffer(
+        &new_uniform_buffer,
+        0,
+        &compute.uniform_buffer,
+        0,
+        uniforms_size as u64,
+    );
+
+    {
+        let mut cpass = encoder.begin_compute_pass();
+        cpass.set_pipeline(&compute.pipeline);
+        cpass.set_bind_group(0, &compute.bind_group, &[]);
+        cpass.dispatch(PARTICLE_COUNT, 1, 1);
+    }
+
+    // create a buffer for reading the particle positions
+    // let read_position_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+    //     label: Some("read-positions"),
+    //     size: compute.buffer_size,
+    //     usage: wgpu::BufferUsage::MAP_READ | wgpu::BufferUsage::COPY_DST,
+    // });
+
+    // encoder.copy_buffer_to_buffer(
+    //     &compute.position_buffer,
+    //     0,
+    //     &read_position_buffer,
+    //     0,
+    //     compute.buffer_size,
+    // );
+
     // submit encoded command buffer
-    println!("submitting encoded command buffer");
     window.swap_chain_queue().submit(&[encoder.finish()]);
 
     // Submit a function for writing our snapshot to a PNG.
@@ -536,7 +529,10 @@ fn vertices_as_bytes(data: &[Vertex]) -> &[u8] {
     unsafe { wgpu::bytes::from_slice(data) }
 }
 
-fn create_compute_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+fn create_compute_bind_group_layout(
+    device: &wgpu::Device,
+    texture_component_type: wgpu::TextureComponentType,
+) -> wgpu::BindGroupLayout {
     let storage_dynamic = false;
     let storage_readonly = false;
     let uniform_dynamic = false;
@@ -551,6 +547,13 @@ fn create_compute_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLay
             storage_dynamic,
             storage_readonly,
         )
+        .sampled_texture(
+            wgpu::ShaderStage::FRAGMENT,
+            true,
+            wgpu::TextureViewDimension::D2,
+            texture_component_type,
+        )
+        .sampler(wgpu::ShaderStage::FRAGMENT)
         .uniform_buffer(wgpu::ShaderStage::COMPUTE, uniform_dynamic)
         .build(device)
 }
@@ -561,11 +564,15 @@ fn create_compute_bind_group(
     position_buffer: &wgpu::Buffer,
     velocity_buffer: &wgpu::Buffer,
     buffer_size: wgpu::BufferAddress,
+    texture: &wgpu::TextureView,
+    sampler: &wgpu::Sampler,
     uniform_buffer: &wgpu::Buffer,
 ) -> wgpu::BindGroup {
     wgpu::BindGroupBuilder::new()
         .buffer_bytes(position_buffer, 0..buffer_size)
         .buffer_bytes(velocity_buffer, 0..buffer_size)
+        .texture_view(texture)
+        .sampler(sampler)
         .buffer::<Uniforms>(uniform_buffer, 0..1)
         .build(device, layout)
 }
