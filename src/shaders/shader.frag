@@ -11,14 +11,8 @@ layout(location = 0) out vec4 f_color;
 
 layout(set = 0, binding = 0) uniform texture2D tex;
 layout(set = 0, binding = 1) uniform sampler tex_sampler;
-layout(set = 0, binding = 2) buffer PositionBuffer { vec2[] positions; };
-layout(set = 0, binding = 3) uniform Uniforms {
-    uint particle_count;
-    float width;
-    float height;
-    float time;
-};
 
 void main() {
-    f_color = texture(sampler2D(tex, tex_sampler), tex_coords);
+    vec3 color = texture(sampler2D(tex, tex_sampler), tex_coords).rgb;
+    f_color = vec4(color * 0.9, 1.0);
 }
