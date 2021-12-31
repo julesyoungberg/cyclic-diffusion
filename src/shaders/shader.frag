@@ -20,6 +20,7 @@ layout(set = 0, binding = 3) uniform Uniforms {
     float threshold;
     float limitation_threshold;
     float decay;
+    float range;
 };
 
 void main() {
@@ -42,7 +43,7 @@ void main() {
         vec2 particle_position = positions[i];
         vec2 diff = abs(position - particle_position);
 
-        if (length(diff) < 1.0) {
+        if (length(diff) < range) {
             has_particle = true;
             break;
         }

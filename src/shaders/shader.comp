@@ -17,6 +17,10 @@ layout(set = 0, binding = 2) uniform Uniforms {
     float width;
     float height;
     float time;
+    float threshold;
+    float limitation_threshold;
+    float decay;
+    float range;
 };
 
 #define TAU 6.2831853072

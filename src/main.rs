@@ -63,10 +63,11 @@ pub struct Uniforms {
     threshold: float,
     limitation_threshold: float,
     decay: float,
+    range: float,
 }
 
-const WIDTH: u32 = 1920;
-const HEIGHT: u32 = 1080;
+const WIDTH: u32 = 960;
+const HEIGHT: u32 = 540;
 const PARTICLE_COUNT: u32 = 5000;
 
 fn main() {
@@ -123,8 +124,7 @@ fn model(app: &App) -> Model {
     // Create the buffer that will store the uniforms.
     let uniforms = create_uniforms(app.time);
     println!("uniforms: {:?}", uniforms);
-    let std140_uniforms = uniforms.std140();
-    let uniforms_bytes = std140_uniforms.as_raw();
+    let uniforms_bytes = uniforms_as_bytes(&uniforms);
     let uniform_buffer = device.create_buffer_with_data(
         uniforms_bytes,
         wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
@@ -206,11 +206,12 @@ fn model(app: &App) -> Model {
     println!("drawing initial design");
     draw.reset();
     draw.background().color(BLACK);
-    draw.line()
-        .start(pt2(0.0, HEIGHT as f32 * 0.3))
-        .end(pt2(0.0, HEIGHT as f32 * -0.3))
-        .weight(4.0)
-        .color(WHITE);
+    draw.ellipse().x_y(0.0, 0.0).radius(20.0).color(WHITE);
+    // draw.line()
+    //     .start(pt2(0.0, HEIGHT as f32 * 0.3))
+    //     .end(pt2(0.0, HEIGHT as f32 * -0.3))
+    //     .weight(4.0)
+    //     .color(WHITE);
 
     // Render our drawing to the texture.
     println!("rendering");
@@ -287,8 +288,7 @@ fn update(app: &App, model: &mut Model, _update: Update) {
 
     // An update for the uniform buffer with the current time.
     let uniforms = create_uniforms(app.time);
-    let std140_uniforms = uniforms.std140();
-    let uniforms_bytes = std140_uniforms.as_raw();
+    let uniforms_bytes = uniforms_as_bytes(&uniforms);
     let uniforms_size = uniforms_bytes.len();
     let new_uniform_buffer =
         device.create_buffer_with_data(uniforms_bytes, wgpu::BufferUsage::COPY_SRC);
@@ -374,32 +374,26 @@ fn update(app: &App, model: &mut Model, _update: Update) {
     //     .unwrap();
 
     // Spawn a future that reads the result of the compute pass.
-    let buffer_size = model.compute.buffer_size;
-    let positions = model.positions.clone();
-    let read_positions_future = async move {
-        let result = read_position_buffer.map_read(0, buffer_size).await;
-        if let Ok(mapping) = result {
-            if let Ok(mut positions) = positions.lock() {
-                let bytes = mapping.as_slice();
-                // "Cast" the slice of bytes to a slice of Vector2 as required.
-                let slice = {
-                    let len = bytes.len() / std::mem::size_of::<Vector2>();
-                    let ptr = bytes.as_ptr() as *const Vector2;
-                    unsafe { std::slice::from_raw_parts(ptr, len) }
-                };
+    // let buffer_size = model.compute.buffer_size;
+    // let positions = model.positions.clone();
+    // let read_positions_future = async move {
+    //     let result = read_position_buffer.map_read(0, buffer_size).await;
+    //     if let Ok(mapping) = result {
+    //         if let Ok(mut positions) = positions.lock() {
+    //             let bytes = mapping.as_slice();
+    //             // "Cast" the slice of bytes to a slice of Vector2 as required.
+    //             let slice = {
+    //                 let len = bytes.len() / std::mem::size_of::<Vector2>();
+    //                 let ptr = bytes.as_ptr() as *const Vector2;
+    //                 unsafe { std::slice::from_raw_parts(ptr, len) }
+    //             };
 
-                positions.copy_from_slice(slice);
-                println!("position[0]: {:?}", positions[0]);
-                println!(
-                    "mapped: {:?}, {:?}",
-                    positions[0].x / (WIDTH as f32 * 0.5),
-                    positions[1].y / (HEIGHT as f32 * 0.5)
-                );
-            }
-        }
-    };
+    //             positions.copy_from_slice(slice);
+    //         }
+    //     }
+    // };
 
-    model.threadpool.spawn_ok(read_positions_future);
+    // model.threadpool.spawn_ok(read_positions_future);
 }
 
 fn view(app: &App, model: &Model, frame: Frame) {
@@ -427,10 +421,15 @@ fn create_uniforms(time: f32) -> Uniforms {
         width: WIDTH as f32,
         height: HEIGHT as f32,
         time,
-        threshold: 0.2,
-        limitation_threshold: 0.01,
+        threshold: 0.8,
+        limitation_threshold: 0.001,
         decay: 0.97,
+        range: 2.0,
     }
+}
+
+fn uniforms_as_bytes(uniforms: &Uniforms) -> &[u8] {
+    unsafe { wgpu::bytes::from(uniforms) }
 }
 
 pub fn float_as_bytes(data: &f32) -> &[u8] {
@@ -496,7 +495,7 @@ fn create_bind_group_layout(
     let uniform_dynamic = false;
     wgpu::BindGroupLayoutBuilder::new()
         .storage_buffer(
-            wgpu::ShaderStage::COMPUTE,
+            wgpu::ShaderStage::FRAGMENT,
             storage_dynamic,
             storage_readonly,
         )
@@ -507,7 +506,7 @@ fn create_bind_group_layout(
             texture_component_type,
         )
         .sampler(wgpu::ShaderStage::FRAGMENT)
-        .uniform_buffer(wgpu::ShaderStage::COMPUTE, uniform_dynamic)
+        .uniform_buffer(wgpu::ShaderStage::FRAGMENT, uniform_dynamic)
         .build(device)
 }
 
