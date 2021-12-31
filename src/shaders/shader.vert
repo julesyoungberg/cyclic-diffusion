@@ -6,9 +6,6 @@
 
 #version 450
 
-precision highp int;
-precision mediump float;
-
 layout(location = 0) in vec2 position;
 layout(location = 0) out vec2 tex_coords;
 

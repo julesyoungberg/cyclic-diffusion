@@ -6,15 +6,12 @@
 
 #version 450
 
-precision highp int;
-precision mediump float;
-
 layout(location = 0) in vec2 tex_coords;
 layout(location = 0) out vec4 f_color;
 
-layout(set = 0, binding = 0) buffer PositionBuffer { vec2[] positions; };
-layout(set = 0, binding = 1) uniform texture2D tex;
-layout(set = 0, binding = 2) uniform sampler tex_sampler;
+layout(set = 0, binding = 0) uniform texture2D tex;
+layout(set = 0, binding = 1) uniform sampler tex_sampler;
+layout(set = 0, binding = 2) buffer PositionBuffer { vec2[] positions; };
 layout(set = 0, binding = 3) uniform Uniforms {
     uint particle_count;
     float width;
@@ -23,11 +20,5 @@ layout(set = 0, binding = 3) uniform Uniforms {
 };
 
 void main() {
-    vec3 color = texture(sampler2D(tex, tex_sampler), tex_coords).rgb;
-
-    // color *= 0.9;
-
-    // todo: aggregate the particles
-
-    f_color = vec4(color, 1.0);
+    f_color = texture(sampler2D(tex, tex_sampler), tex_coords);
 }

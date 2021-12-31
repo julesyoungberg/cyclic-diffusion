@@ -14,17 +14,19 @@ struct Model {
     uniform_texture: wgpu::Texture,
     draw: nannou::Draw,
     renderer: nannou::draw::Renderer,
+    texture_capturer: wgpu::TextureCapturer,
     texture_reshaper: wgpu::TextureReshaper,
     bind_group: wgpu::BindGroup,
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
+    uniform_buffer: wgpu::Buffer,
+    ran: bool,
 }
 
 struct Compute {
     position_buffer: wgpu::Buffer,
     velocity_buffer: wgpu::Buffer,
     buffer_size: wgpu::BufferAddress,
-    uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     pipeline: wgpu::ComputePipeline,
 }
@@ -149,7 +151,6 @@ fn model(app: &App) -> Model {
 
     println!("creating bind group layout");
     let bind_group_layout = create_bind_group_layout(device, uniform_texture_view.component_type());
-    println!("bind group layout: {:?}", bind_group_layout);
     println!("creating bind group");
     let bind_group = create_bind_group(
         device,
@@ -162,7 +163,6 @@ fn model(app: &App) -> Model {
     );
     println!("creating pipeline layout");
     let pipeline_layout = create_pipeline_layout(device, &bind_group_layout);
-    println!("pipeline layout: {:?}", pipeline_layout);
     println!("creating render pipeline");
     let render_pipeline =
         create_render_pipeline(device, &pipeline_layout, &vs_mod, &fs_mod, sample_count);
@@ -196,6 +196,10 @@ fn model(app: &App) -> Model {
     let mut renderer =
         nannou::draw::RendererBuilder::new().build_from_texture_descriptor(device, descriptor);
 
+    // Create the texture capturer.
+    println!("creating texture capturer");
+    let texture_capturer = wgpu::TextureCapturer::default();
+
     // draw initial aggregate
     println!("drawing initial design");
     draw.reset();
@@ -218,15 +222,37 @@ fn model(app: &App) -> Model {
     println!("copying app texture to buffer");
     copy_texture(&mut encoder, &app_texture, &uniform_texture);
 
+    // Take a snapshot of the texture. The capturer will do the following:
+    //
+    // 1. Resolve the texture to a non-multisampled texture if necessary.
+    // 2. Convert the format to non-linear 8-bit sRGBA ready for image storage.
+    // 3. Copy the result to a buffer ready to be mapped for reading.
+    let snapshot = texture_capturer.capture(device, &mut encoder, &uniform_texture);
+
     // submit encoded command buffer
     println!("submitting encoded command buffer");
     window.swap_chain_queue().submit(&[encoder.finish()]);
+
+    // Submit a function for writing our snapshot to a PNG.
+    //
+    // NOTE: It is essential that the commands for capturing the snapshot are `submit`ted before we
+    // attempt to read the snapshot - otherwise we will read a blank texture!
+    // Make sure the directory where we will save images to exists.
+    std::fs::create_dir_all(&capture_directory(app)).unwrap();
+    let path = capture_directory(app).join("0").with_extension("png");
+    snapshot
+        .read(move |result| {
+            let image = result.expect("failed to map texture memory");
+            image
+                .save(&path)
+                .expect("failed to save texture to png image");
+        })
+        .unwrap();
 
     let compute = Compute {
         position_buffer,
         velocity_buffer,
         buffer_size,
-        uniform_buffer,
         bind_group: compute_bind_group,
         pipeline: compute_pipeline,
     };
@@ -240,26 +266,35 @@ fn model(app: &App) -> Model {
         threadpool,
         app_texture,
         uniform_texture,
+        texture_capturer,
         texture_reshaper,
         draw,
         renderer,
         bind_group,
         render_pipeline,
         vertex_buffer,
+        uniform_buffer,
+        ran: false,
     }
 }
 
 fn update(app: &App, model: &mut Model, _update: Update) {
+    if model.ran {
+        return;
+    }
+
+    model.ran = true;
+
     let window = app.main_window();
     let device = window.swap_chain_device();
-    let compute = &mut model.compute;
+    // let compute = &mut model.compute;
 
-    // create a buffer for reading the particle positions
-    let read_position_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("read-positions"),
-        size: compute.buffer_size,
-        usage: wgpu::BufferUsage::MAP_READ | wgpu::BufferUsage::COPY_DST,
-    });
+    // // create a buffer for reading the particle positions
+    // let read_position_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+    //     label: Some("read-positions"),
+    //     size: compute.buffer_size,
+    //     usage: wgpu::BufferUsage::MAP_READ | wgpu::BufferUsage::COPY_DST,
+    // });
 
     // An update for the uniform buffer with the current time.
     let uniforms = create_uniforms(app.time);
@@ -269,7 +304,7 @@ fn update(app: &App, model: &mut Model, _update: Update) {
     let new_uniform_buffer =
         device.create_buffer_with_data(uniforms_bytes, wgpu::BufferUsage::COPY_SRC);
 
-    // The encoder we'll use to encode the compute pass.
+    // The encoder we'll use to encode the compute pass and render pass.
     let desc = wgpu::CommandEncoderDescriptor {
         label: Some("encoder"),
     };
@@ -278,25 +313,25 @@ fn update(app: &App, model: &mut Model, _update: Update) {
     encoder.copy_buffer_to_buffer(
         &new_uniform_buffer,
         0,
-        &compute.uniform_buffer,
+        &model.uniform_buffer,
         0,
         uniforms_size as u64,
     );
 
-    {
-        let mut cpass = encoder.begin_compute_pass();
-        cpass.set_pipeline(&compute.pipeline);
-        cpass.set_bind_group(0, &compute.bind_group, &[]);
-        cpass.dispatch(PARTICLE_COUNT, 1, 1);
-    }
+    // {
+    //     let mut cpass = encoder.begin_compute_pass();
+    //     cpass.set_pipeline(&compute.pipeline);
+    //     cpass.set_bind_group(0, &compute.bind_group, &[]);
+    //     cpass.dispatch(PARTICLE_COUNT, 1, 1);
+    // }
 
-    encoder.copy_buffer_to_buffer(
-        &compute.position_buffer,
-        0,
-        &read_position_buffer,
-        0,
-        compute.buffer_size,
-    );
+    // encoder.copy_buffer_to_buffer(
+    //     &compute.position_buffer,
+    //     0,
+    //     &read_position_buffer,
+    //     0,
+    //     compute.buffer_size,
+    // );
 
     let texture_view = model.app_texture.view().build();
 
@@ -312,42 +347,60 @@ fn update(app: &App, model: &mut Model, _update: Update) {
         render_pass.draw(vertex_range, instance_range);
     }
 
-    // copy_texture(
-    //     &device,
-    //     &mut encoder,
-    //     &model.app_texture,
-    //     &model.uniform_texture,
-    // );
-
     // copy app texture to uniform texture
     println!("copying app texture to buffer");
     copy_texture(&mut encoder, &model.app_texture, &model.uniform_texture);
+
+    // Take a snapshot of the texture. The capturer will do the following:
+    //
+    // 1. Resolve the texture to a non-multisampled texture if necessary.
+    // 2. Convert the format to non-linear 8-bit sRGBA ready for image storage.
+    // 3. Copy the result to a buffer ready to be mapped for reading.
+    let snapshot = model
+        .texture_capturer
+        .capture(device, &mut encoder, &model.uniform_texture);
 
     // submit encoded command buffer
     println!("submitting encoded command buffer");
     window.swap_chain_queue().submit(&[encoder.finish()]);
 
-    // Spawn a future that reads the result of the compute pass.
-    let positions = model.positions.clone();
-    let buffer_size = model.compute.buffer_size;
-    let read_positions_future = async move {
-        let result = read_position_buffer.map_read(0, buffer_size).await;
-        if let Ok(mapping) = result {
-            if let Ok(mut positions) = positions.lock() {
-                let bytes = mapping.as_slice();
-                // "Cast" the slice of bytes to a slice of Vector2 as required.
-                let slice = {
-                    let len = bytes.len() / std::mem::size_of::<Vector2>();
-                    let ptr = bytes.as_ptr() as *const Vector2;
-                    unsafe { std::slice::from_raw_parts(ptr, len) }
-                };
+    // Submit a function for writing our snapshot to a PNG.
+    //
+    // NOTE: It is essential that the commands for capturing the snapshot are `submit`ted before we
+    // attempt to read the snapshot - otherwise we will read a blank texture!
+    let elapsed_frames = app.main_window().elapsed_frames();
+    let path = capture_directory(app)
+        .join(elapsed_frames.to_string())
+        .with_extension("png");
+    snapshot
+        .read(move |result| {
+            let image = result.expect("failed to map texture memory");
+            image
+                .save(&path)
+                .expect("failed to save texture to png image");
+        })
+        .unwrap();
 
-                positions.copy_from_slice(slice);
-            }
-        }
-    };
+    // // Spawn a future that reads the result of the compute pass.
+    // let positions = model.positions.clone();
+    // let read_positions_future = async move {
+    //     let result = read_position_buffer.map_read(0, compute.buffer_size).await;
+    //     if let Ok(mapping) = result {
+    //         if let Ok(mut positions) = positions.lock() {
+    //             let bytes = mapping.as_slice();
+    //             // "Cast" the slice of bytes to a slice of Vector2 as required.
+    //             let slice = {
+    //                 let len = bytes.len() / std::mem::size_of::<Vector2>();
+    //                 let ptr = bytes.as_ptr() as *const Vector2;
+    //                 unsafe { std::slice::from_raw_parts(ptr, len) }
+    //             };
 
-    model.threadpool.spawn_ok(read_positions_future);
+    //             positions.copy_from_slice(slice);
+    //         }
+    //     }
+    // };
+
+    // model.threadpool.spawn_ok(read_positions_future);
 }
 
 fn view(app: &App, model: &Model, frame: Frame) {
@@ -440,11 +493,6 @@ fn create_bind_group_layout(
     let storage_readonly = false;
     let uniform_dynamic = false;
     wgpu::BindGroupLayoutBuilder::new()
-        .storage_buffer(
-            wgpu::ShaderStage::FRAGMENT,
-            storage_dynamic,
-            storage_readonly,
-        )
         .sampled_texture(
             wgpu::ShaderStage::FRAGMENT,
             false,
@@ -452,6 +500,11 @@ fn create_bind_group_layout(
             texture_component_type,
         )
         .sampler(wgpu::ShaderStage::FRAGMENT)
+        .storage_buffer(
+            wgpu::ShaderStage::FRAGMENT,
+            storage_dynamic,
+            storage_readonly,
+        )
         .uniform_buffer(wgpu::ShaderStage::FRAGMENT, uniform_dynamic)
         .build(device)
 }
@@ -466,9 +519,9 @@ fn create_bind_group(
     uniform_buffer: &wgpu::Buffer,
 ) -> wgpu::BindGroup {
     wgpu::BindGroupBuilder::new()
-        .buffer_bytes(position_buffer, 0..buffer_size)
         .texture_view(texture)
         .sampler(sampler)
+        .buffer_bytes(position_buffer, 0..buffer_size)
         .buffer::<Uniforms>(uniform_buffer, 0..1)
         .build(device, layout)
 }
@@ -568,4 +621,11 @@ pub fn copy_texture(encoder: &mut wgpu::CommandEncoder, src: &wgpu::Texture, dst
     let dst_copy_view = dst.default_copy_view();
     let copy_size = dst.extent();
     encoder.copy_texture_to_texture(src_copy_view, dst_copy_view, copy_size);
+}
+
+// The directory where we'll save the frames.
+fn capture_directory(app: &App) -> std::path::PathBuf {
+    app.project_path()
+        .expect("could not locate project_path")
+        .join("frames")
 }
