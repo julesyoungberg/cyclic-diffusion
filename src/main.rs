@@ -61,6 +61,8 @@ pub struct Uniforms {
     height: float,
     time: float,
     threshold: float,
+    limitation_threshold: float,
+    decay: float,
 }
 
 const WIDTH: u32 = 1920;
@@ -425,7 +427,9 @@ fn create_uniforms(time: f32) -> Uniforms {
         width: WIDTH as f32,
         height: HEIGHT as f32,
         time,
-        threshold: 0.0,
+        threshold: 0.2,
+        limitation_threshold: 0.01,
+        decay: 0.97,
     }
 }
 

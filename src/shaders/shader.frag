@@ -18,11 +18,14 @@ layout(set = 0, binding = 3) uniform Uniforms {
     float height;
     float time;
     float threshold;
+    float limitation_threshold;
+    float decay;
 };
 
 void main() {
     vec3 color = texture(sampler2D(tex, tex_sampler), tex_coords).rgb;
-    color *= 0.99;
+    float current = (color.r + color.g + color.b) / 3.0;
+    color *= decay;
     
     // get the corresponding world position
     vec2 position = tex_coords;
@@ -45,7 +48,7 @@ void main() {
         }
     }
 
-    if (has_particle) {
+    if (has_particle && current <= limitation_threshold) {
         // make position nonnegative
         position += vec2(hwidth, hheight);
 
@@ -64,13 +67,14 @@ void main() {
         if (avg > threshold) {
             color = vec3(1.0);
         }
-    } else {
-        vec2 particle_position = positions[0] / vec2(width * 0.5, height * 0.5);
-        particle_position += 0.5;
+    } 
+    // else {
+    //     vec2 particle_position = positions[0] / vec2(width * 0.5, height * 0.5);
+    //     particle_position += 0.5;
 
-        float d = distance(position, particle_position);
-        f_color = vec4(d);
-    }
+    //     float d = distance(position, particle_position);
+    //     f_color = vec4(d);
+    // }
 
     f_color = vec4(color, 1.0);
 }
