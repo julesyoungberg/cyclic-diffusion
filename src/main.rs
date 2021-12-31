@@ -142,7 +142,7 @@ fn model(app: &App) -> Model {
     let texture_reshaper = create_texture_reshaper(&device, &app_texture, sample_count);
 
     println!("creating uniform texture");
-    let uniform_texture = create_uniform_texture(&device, size);
+    let uniform_texture = create_uniform_texture(&device, size, sample_count);
     let uniform_texture_view = uniform_texture.view().build();
 
     // Create the sampler for sampling from the source texture.
@@ -458,11 +458,11 @@ fn create_app_texture(device: &wgpu::Device, size: Point2, msaa_samples: u32) ->
         .build(device)
 }
 
-fn create_uniform_texture(device: &wgpu::Device, size: Point2) -> wgpu::Texture {
+fn create_uniform_texture(device: &wgpu::Device, size: Point2, msaa_samples: u32) -> wgpu::Texture {
     wgpu::TextureBuilder::new()
         .size([size[0] as u32, size[1] as u32])
         .usage(wgpu::TextureBuilder::REQUIRED_IMAGE_TEXTURE_USAGE | wgpu::TextureUsage::SAMPLED)
-        // .sample_count(1)
+        .sample_count(msaa_samples)
         .format(Frame::TEXTURE_FORMAT)
         .build(device)
 }
@@ -495,7 +495,7 @@ fn create_bind_group_layout(
     wgpu::BindGroupLayoutBuilder::new()
         .sampled_texture(
             wgpu::ShaderStage::FRAGMENT,
-            false,
+            true,
             wgpu::TextureViewDimension::D2,
             texture_component_type,
         )
