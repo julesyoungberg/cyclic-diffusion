@@ -10,6 +10,14 @@ struct Model {
     compute: Compute,
     positions: Arc<Mutex<Vec<Vec2>>>,
     threadpool: futures::executor::ThreadPool,
+    // The texture that we will draw to.
+    texture: wgpu::Texture,
+    // Create a `Draw` instance for drawing to our texture.
+    draw: nannou::Draw,
+    // The type used to render the `Draw` vertices to our texture.
+    renderer: nannou::draw::Renderer,
+    // The type used to resize our texture to the window texture.
+    texture_reshaper: wgpu::TextureReshaper,
 }
 
 struct Compute {
@@ -125,10 +133,43 @@ fn model(app: &App) -> Model {
     // Create a thread pool capable of running our GPU buffer read futures.
     let threadpool = futures::executor::ThreadPool::new().unwrap();
 
+    // create our custom texture for rendering
+    let sample_count = window.msaa_samples();
+    let size = pt2(WIDTH as f32, HEIGHT as f32);
+    let texture = create_app_texture(&device, size, sample_count);
+    let texture_reshaper = create_texture_reshaper(&device, &texture, sample_count);
+
+    // Create our `Draw` instance and a renderer for it.
+    let draw = nannou::Draw::new();
+    let descriptor = texture.descriptor();
+    let mut renderer =
+        nannou::draw::RendererBuilder::new().build_from_texture_descriptor(device, descriptor);
+
+    // draw initial aggregate
+    draw.reset();
+    draw.background().color(BLACK);
+    draw.line()
+        .start(pt2(0.0, HEIGHT as f32 * 0.3))
+        .end(pt2(0.0, HEIGHT as f32 * -0.3))
+        .weight(4.0)
+        .color(WHITE);
+
+    // Render our drawing to the texture.
+    let ce_desc = wgpu::CommandEncoderDescriptor {
+        label: Some("texture renderer"),
+    };
+    let mut encoder = device.create_command_encoder(&ce_desc);
+    renderer.render_to_texture(device, &mut encoder, &draw, &texture);
+    window.swap_chain_queue().submit([encoder.finish()]);
+
     Model {
         compute,
         positions: Arc::new(Mutex::new(positions)),
         threadpool,
+        texture,
+        texture_reshaper,
+        draw,
+        renderer,
     }
 }
 
@@ -215,16 +256,22 @@ fn update(app: &App, model: &mut Model, _update: Update) {
 }
 
 fn view(app: &App, model: &Model, frame: Frame) {
-    frame.clear(BLACK);
-    let draw = app.draw();
+    // frame.clear(BLACK);
+    // let draw = app.draw();
 
-    if let Ok(positions) = model.positions.lock() {
-        for &p in positions.iter() {
-            draw.ellipse().radius(2.0).color(WHITE).x_y(p.x, p.y);
-        }
-    }
+    // if let Ok(positions) = model.positions.lock() {
+    //     for &p in positions.iter() {
+    //         draw.ellipse().radius(2.0).color(WHITE).x_y(p.x, p.y);
+    //     }
+    // }
 
-    draw.to_frame(app, &frame).unwrap();
+    // draw.to_frame(app, &frame).unwrap();
+
+    // Sample the texture and write it to the frame.
+    let mut encoder = frame.command_encoder();
+    model
+        .texture_reshaper
+        .encode_render_pass(frame.texture_view(), &mut *encoder);
 }
 
 fn create_uniforms(time: f32) -> Uniforms {
@@ -289,7 +336,7 @@ fn create_pipeline_layout(
     bind_group_layout: &wgpu::BindGroupLayout,
 ) -> wgpu::PipelineLayout {
     device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("nannou"),
+        label: Some("compute-pipeline-layout"),
         bind_group_layouts: &[&bind_group_layout],
         push_constant_ranges: &[],
     })
@@ -301,10 +348,37 @@ fn create_compute_pipeline(
     cs_mod: &wgpu::ShaderModule,
 ) -> wgpu::ComputePipeline {
     let desc = wgpu::ComputePipelineDescriptor {
-        label: Some("nannou"),
+        label: Some("compute-pipeline"),
         layout: Some(layout),
         module: &cs_mod,
         entry_point: "main",
     };
     device.create_compute_pipeline(&desc)
+}
+
+fn create_app_texture(device: &wgpu::Device, size: Point2, msaa_samples: u32) -> wgpu::Texture {
+    wgpu::TextureBuilder::new()
+        .size([size[0] as u32, size[1] as u32])
+        .usage(wgpu::TextureUsage::RENDER_ATTACHMENT | wgpu::TextureUsage::SAMPLED)
+        .sample_count(msaa_samples)
+        .format(Frame::TEXTURE_FORMAT)
+        .build(device)
+}
+
+fn create_texture_reshaper(
+    device: &wgpu::Device,
+    texture: &wgpu::Texture,
+    msaa_samples: u32,
+) -> wgpu::TextureReshaper {
+    let texture_view = texture.view().build();
+    let texture_component_type = texture.sample_type();
+    let dst_format = Frame::TEXTURE_FORMAT;
+    wgpu::TextureReshaper::new(
+        device,
+        &texture_view,
+        msaa_samples,
+        texture_component_type,
+        msaa_samples,
+        dst_format,
+    )
 }
