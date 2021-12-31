@@ -14,6 +14,7 @@ struct Model {
 
 struct Compute {
     position_buffer: wgpu::Buffer,
+    velocity_buffer: wgpu::Buffer,
     buffer_size: wgpu::BufferAddress,
     uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
@@ -31,7 +32,7 @@ pub struct Uniforms {
 
 const WIDTH: u32 = 1920;
 const HEIGHT: u32 = 1080;
-const PARTICLE_COUNT: u32 = 1000;
+const PARTICLE_COUNT: u32 = 5000;
 
 fn main() {
     nannou::app(model).update(update).run();
@@ -48,6 +49,7 @@ fn model(app: &App) -> Model {
     let device = window.swap_chain_device();
 
     let mut positions = vec![];
+    let mut velocities = vec![];
 
     let hwidth = WIDTH as f32 * 0.5;
     let hheight = HEIGHT as f32 * 0.5;
@@ -57,9 +59,15 @@ fn model(app: &App) -> Model {
         let position_y = rand::thread_rng().gen_range(-hheight, hheight);
         let position = pt2(position_x, position_y);
         positions.push(position);
+
+        let velocity_x = rand::thread_rng().gen_range(-1.0, 1.0);
+        let velocity_y = rand::thread_rng().gen_range(-1.0, 1.0);
+        let velocity = pt2(velocity_x, velocity_y);
+        velocities.push(velocity);
     }
 
     let position_bytes = vectors_as_byte_vec(&positions);
+    let velocity_bytes = vectors_as_byte_vec(&velocities);
 
     // Create the buffers that will store the result of our compute operation.
     let buffer_size =
@@ -68,6 +76,12 @@ fn model(app: &App) -> Model {
     let position_buffer = device.create_buffer_init(&wgpu::BufferInitDescriptor {
         label: Some("particle-positions"),
         contents: &position_bytes[..],
+        usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_SRC,
+    });
+
+    let velocity_buffer = device.create_buffer_init(&wgpu::BufferInitDescriptor {
+        label: Some("particle-velocities"),
+        contents: &velocity_bytes[..],
         usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_SRC,
     });
 
@@ -92,6 +106,7 @@ fn model(app: &App) -> Model {
         device,
         &bind_group_layout,
         &position_buffer,
+        &velocity_buffer,
         buffer_size,
         &uniform_buffer,
     );
@@ -100,6 +115,7 @@ fn model(app: &App) -> Model {
 
     let compute = Compute {
         position_buffer,
+        velocity_buffer,
         buffer_size,
         uniform_buffer,
         bind_group,
@@ -243,6 +259,11 @@ fn create_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
             storage_dynamic,
             storage_readonly,
         )
+        .storage_buffer(
+            wgpu::ShaderStage::COMPUTE,
+            storage_dynamic,
+            storage_readonly,
+        )
         .uniform_buffer(wgpu::ShaderStage::COMPUTE, uniform_dynamic)
         .build(device)
 }
@@ -251,12 +272,14 @@ fn create_bind_group(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
     position_buffer: &wgpu::Buffer,
+    velocity_buffer: &wgpu::Buffer,
     buffer_size: wgpu::BufferAddress,
     uniform_buffer: &wgpu::Buffer,
 ) -> wgpu::BindGroup {
     let buffer_size_bytes = std::num::NonZeroU64::new(buffer_size).unwrap();
     wgpu::BindGroupBuilder::new()
         .buffer_bytes(position_buffer, 0, Some(buffer_size_bytes))
+        .buffer_bytes(velocity_buffer, 0, Some(buffer_size_bytes))
         .buffer::<Uniforms>(uniform_buffer, 0..1)
         .build(device, layout)
 }

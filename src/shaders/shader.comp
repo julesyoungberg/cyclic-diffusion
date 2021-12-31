@@ -12,7 +12,9 @@ layout(local_size_x = 1) in;
 
 layout(set = 0, binding = 0) buffer PositionBuffer { vec2[] positions; };
 
-layout(set = 0, binding = 1) uniform Uniforms {
+layout(set = 0, binding = 1) buffer VelocityBuffer { vec2[] velocities; };
+
+layout(set = 0, binding = 2) uniform Uniforms {
     uint particle_count;
     float width;
     float height;
@@ -103,13 +105,17 @@ void main() {
     // get particle data
     uint index = gl_GlobalInvocationID.x;
     vec2 position = positions[index];
+    vec2 velocity = velocities[index];
 
     // use noise as angle to generate displacement vector
-    float noise_val = perlin_noise(vec3(position, time * 0.1)) * TAU;
+    float noise_val = perlin_noise(vec3(position, time * 0.01)) * TAU;
     vec2 displacement = vec2(cos(noise_val), sin(noise_val));
 
+    velocity += displacement;
+    velocity = clamp(velocity, -1.0, 1.0);
+
     // update position
-    position += displacement;
+    position += velocity;
 
     // wrap around horizontally
     float hwidth = width * 0.5;
@@ -127,5 +133,6 @@ void main() {
         position.y -= height;
     }
 
+    velocities[index] = velocity;
     positions[index] = position;
 }
