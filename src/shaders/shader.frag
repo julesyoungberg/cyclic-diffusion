@@ -25,7 +25,7 @@ layout(set = 0, binding = 3) uniform Uniforms {
 void main() {
     vec3 color = texture(sampler2D(tex, tex_sampler), tex_coords).rgb;
 
-    color *= 0.9;
+    // color *= 0.9;
 
     // todo: aggregate the particles
 

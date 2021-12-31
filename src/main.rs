@@ -1,14 +1,14 @@
 use glsl_layout::float;
 use glsl_layout::*;
 use nannou::prelude::*;
-use nannou::wgpu::BufferInitDescriptor;
+use nannou::wgpu::BufferDescriptor;
 use rand;
 use rand::Rng;
 use std::sync::{Arc, Mutex};
 
 struct Model {
     compute: Compute,
-    positions: Arc<Mutex<Vec<Vec2>>>,
+    positions: Arc<Mutex<Vec<Vector2>>>,
     threadpool: futures::executor::ThreadPool,
     app_texture: wgpu::Texture,
     uniform_texture: wgpu::Texture,
@@ -104,31 +104,27 @@ fn model(app: &App) -> Model {
 
     // Create the buffers that will store the result of our compute operation.
     let buffer_size =
-        (PARTICLE_COUNT as usize * std::mem::size_of::<Vec2>()) as wgpu::BufferAddress;
+        (PARTICLE_COUNT as usize * std::mem::size_of::<Vector2>()) as wgpu::BufferAddress;
 
-    let position_buffer = device.create_buffer_init(&wgpu::BufferInitDescriptor {
-        label: Some("particle-positions"),
-        contents: &position_bytes[..],
-        usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_SRC,
-    });
+    let position_buffer = device.create_buffer_with_data(
+        &position_bytes[..],
+        wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_SRC,
+    );
 
-    let velocity_buffer = device.create_buffer_init(&wgpu::BufferInitDescriptor {
-        label: Some("particle-velocities"),
-        contents: &velocity_bytes[..],
-        usage: wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_SRC,
-    });
+    let velocity_buffer = device.create_buffer_with_data(
+        &velocity_bytes[..],
+        wgpu::BufferUsage::STORAGE | wgpu::BufferUsage::COPY_SRC,
+    );
 
     // Create the buffer that will store the uniforms.
     let uniforms = create_uniforms(app.time);
     println!("uniforms: {:?}", uniforms);
     let std140_uniforms = uniforms.std140();
     let uniforms_bytes = std140_uniforms.as_raw();
-    let usage = wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST;
-    let uniform_buffer = device.create_buffer_init(&BufferInitDescriptor {
-        label: Some("uniform-buffer"),
-        contents: uniforms_bytes,
-        usage,
-    });
+    let uniform_buffer = device.create_buffer_with_data(
+        uniforms_bytes,
+        wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
+    );
 
     // Create the compute shader module.
     println!("loading shaders");
@@ -149,16 +145,10 @@ fn model(app: &App) -> Model {
 
     // Create the sampler for sampling from the source texture.
     println!("creating sampler");
-    let sampler_desc = wgpu::SamplerBuilder::new().into_descriptor();
-    let sampler_filtering = wgpu::sampler_filtering(&sampler_desc);
-    let sampler = device.create_sampler(&sampler_desc);
+    let sampler = wgpu::SamplerBuilder::new().build(device);
 
     println!("creating bind group layout");
-    let bind_group_layout = create_bind_group_layout(
-        device,
-        uniform_texture_view.sample_type(),
-        sampler_filtering,
-    );
+    let bind_group_layout = create_bind_group_layout(device, uniform_texture_view.component_type());
     println!("bind group layout: {:?}", bind_group_layout);
     println!("creating bind group");
     let bind_group = create_bind_group(
@@ -179,12 +169,7 @@ fn model(app: &App) -> Model {
 
     println!("creating vertex buffer");
     let vertices_bytes = vertices_as_bytes(&VERTICES[..]);
-    let usage = wgpu::BufferUsage::VERTEX;
-    let vertex_buffer = device.create_buffer_init(&BufferInitDescriptor {
-        label: None,
-        contents: vertices_bytes,
-        usage,
-    });
+    let vertex_buffer = device.create_buffer_with_data(vertices_bytes, wgpu::BufferUsage::VERTEX);
 
     // Create the bind group and pipeline.
     println!("creating compute bind group layout");
@@ -231,23 +216,11 @@ fn model(app: &App) -> Model {
 
     // copy app texture to uniform texture
     println!("copying app texture to buffer");
-    // copy_texture(&device, &mut encoder, &app_texture, &uniform_texture);
-    let buffer = app_texture.to_buffer(&device, &mut encoder);
+    copy_texture(&mut encoder, &app_texture, &uniform_texture);
 
     // submit encoded command buffer
     println!("submitting encoded command buffer");
-    window.swap_chain_queue().submit([encoder.finish()]);
-
-    let ce_desc = wgpu::CommandEncoderDescriptor {
-        label: Some("texture-copier"),
-    };
-    let mut copy_encoder = device.create_command_encoder(&ce_desc);
-
-    println!("copying buffer to uniform texture");
-    buffer.encode_copy_into(&mut copy_encoder, &uniform_texture);
-
-    println!("submitting encoded command buffer");
-    window.swap_chain_queue().submit([copy_encoder.finish()]);
+    window.swap_chain_queue().submit(&[encoder.finish()]);
 
     let compute = Compute {
         position_buffer,
@@ -286,7 +259,6 @@ fn update(app: &App, model: &mut Model, _update: Update) {
         label: Some("read-positions"),
         size: compute.buffer_size,
         usage: wgpu::BufferUsage::MAP_READ | wgpu::BufferUsage::COPY_DST,
-        mapped_at_creation: false,
     });
 
     // An update for the uniform buffer with the current time.
@@ -294,12 +266,8 @@ fn update(app: &App, model: &mut Model, _update: Update) {
     let std140_uniforms = uniforms.std140();
     let uniforms_bytes = std140_uniforms.as_raw();
     let uniforms_size = uniforms_bytes.len();
-    let usage = wgpu::BufferUsage::COPY_SRC;
-    let new_uniform_buffer = device.create_buffer_init(&BufferInitDescriptor {
-        label: Some("uniform-data-transfer"),
-        contents: uniforms_bytes,
-        usage,
-    });
+    let new_uniform_buffer =
+        device.create_buffer_with_data(uniforms_bytes, wgpu::BufferUsage::COPY_SRC);
 
     // The encoder we'll use to encode the compute pass.
     let desc = wgpu::CommandEncoderDescriptor {
@@ -316,10 +284,7 @@ fn update(app: &App, model: &mut Model, _update: Update) {
     );
 
     {
-        let pass_desc = wgpu::ComputePassDescriptor {
-            label: Some("compute-pass"),
-        };
-        let mut cpass = encoder.begin_compute_pass(&pass_desc);
+        let mut cpass = encoder.begin_compute_pass();
         cpass.set_pipeline(&compute.pipeline);
         cpass.set_bind_group(0, &compute.bind_group, &[]);
         cpass.dispatch(PARTICLE_COUNT, 1, 1);
@@ -341,7 +306,7 @@ fn update(app: &App, model: &mut Model, _update: Update) {
             .begin(&mut encoder);
         render_pass.set_bind_group(0, &model.bind_group, &[]);
         render_pass.set_pipeline(&model.render_pipeline);
-        render_pass.set_vertex_buffer(0, model.vertex_buffer.slice(..));
+        render_pass.set_vertex_buffer(0, &model.vertex_buffer, 0, 0);
         let vertex_range = 0..VERTICES.len() as u32;
         let instance_range = 0..1;
         render_pass.draw(vertex_range, instance_range);
@@ -356,35 +321,24 @@ fn update(app: &App, model: &mut Model, _update: Update) {
 
     // copy app texture to uniform texture
     println!("copying app texture to buffer");
-    // copy_texture(&device, &mut encoder, &app_texture, &uniform_texture);
-    let buffer = model.app_texture.to_buffer(&device, &mut encoder);
+    copy_texture(&mut encoder, &model.app_texture, &model.uniform_texture);
 
     // submit encoded command buffer
     println!("submitting encoded command buffer");
-    window.swap_chain_queue().submit([encoder.finish()]);
-
-    let ce_desc = wgpu::CommandEncoderDescriptor {
-        label: Some("texture-copier"),
-    };
-    let mut copy_encoder = device.create_command_encoder(&ce_desc);
-
-    println!("copying buffer to uniform texture");
-    buffer.encode_copy_into(&mut copy_encoder, &model.uniform_texture);
-
-    println!("submitting encoded command buffer");
-    window.swap_chain_queue().submit([copy_encoder.finish()]);
+    window.swap_chain_queue().submit(&[encoder.finish()]);
 
     // Spawn a future that reads the result of the compute pass.
     let positions = model.positions.clone();
+    let buffer_size = model.compute.buffer_size;
     let read_positions_future = async move {
-        let slice = read_position_buffer.slice(..);
-        if let Ok(_) = slice.map_async(wgpu::MapMode::Read).await {
+        let result = read_position_buffer.map_read(0, buffer_size).await;
+        if let Ok(mapping) = result {
             if let Ok(mut positions) = positions.lock() {
-                let bytes = &slice.get_mapped_range()[..];
-                // "Cast" the slice of bytes to a slice of Vec2 as required.
+                let bytes = mapping.as_slice();
+                // "Cast" the slice of bytes to a slice of Vector2 as required.
                 let slice = {
-                    let len = bytes.len() / std::mem::size_of::<Vec2>();
-                    let ptr = bytes.as_ptr() as *const Vec2;
+                    let len = bytes.len() / std::mem::size_of::<Vector2>();
+                    let ptr = bytes.as_ptr() as *const Vector2;
                     unsafe { std::slice::from_raw_parts(ptr, len) }
                 };
 
@@ -428,7 +382,7 @@ pub fn float_as_bytes(data: &f32) -> &[u8] {
     unsafe { wgpu::bytes::from(data) }
 }
 
-pub fn vectors_as_byte_vec(data: &[Vec2]) -> Vec<u8> {
+pub fn vectors_as_byte_vec(data: &[Vector2]) -> Vec<u8> {
     let mut bytes = vec![];
     data.iter().for_each(|v| {
         bytes.extend(float_as_bytes(&v.x));
@@ -441,7 +395,7 @@ fn create_app_texture(device: &wgpu::Device, size: Point2, msaa_samples: u32) ->
     wgpu::TextureBuilder::new()
         .size([size[0] as u32, size[1] as u32])
         .usage(
-            wgpu::TextureUsage::RENDER_ATTACHMENT
+            wgpu::TextureUsage::OUTPUT_ATTACHMENT
                 | wgpu::TextureUsage::SAMPLED
                 | wgpu::TextureUsage::COPY_SRC
                 | wgpu::TextureUsage::COPY_DST,
@@ -466,7 +420,7 @@ fn create_texture_reshaper(
     msaa_samples: u32,
 ) -> wgpu::TextureReshaper {
     let texture_view = texture.view().build();
-    let texture_component_type = texture.sample_type();
+    let texture_component_type = texture.component_type();
     let dst_format = Frame::TEXTURE_FORMAT;
     wgpu::TextureReshaper::new(
         device,
@@ -480,8 +434,7 @@ fn create_texture_reshaper(
 
 fn create_bind_group_layout(
     device: &wgpu::Device,
-    texture_sample_type: wgpu::TextureSampleType,
-    sampler_filtering: bool,
+    texture_component_type: wgpu::TextureComponentType,
 ) -> wgpu::BindGroupLayout {
     let storage_dynamic = false;
     let storage_readonly = false;
@@ -492,13 +445,13 @@ fn create_bind_group_layout(
             storage_dynamic,
             storage_readonly,
         )
-        .texture(
+        .sampled_texture(
             wgpu::ShaderStage::FRAGMENT,
             false,
             wgpu::TextureViewDimension::D2,
-            texture_sample_type,
+            texture_component_type,
         )
-        .sampler(wgpu::ShaderStage::FRAGMENT, sampler_filtering)
+        .sampler(wgpu::ShaderStage::FRAGMENT)
         .uniform_buffer(wgpu::ShaderStage::FRAGMENT, uniform_dynamic)
         .build(device)
 }
@@ -512,9 +465,8 @@ fn create_bind_group(
     sampler: &wgpu::Sampler,
     uniform_buffer: &wgpu::Buffer,
 ) -> wgpu::BindGroup {
-    let buffer_size_bytes = std::num::NonZeroU64::new(buffer_size).unwrap();
     wgpu::BindGroupBuilder::new()
-        .buffer_bytes(position_buffer, 0, Some(buffer_size_bytes))
+        .buffer_bytes(position_buffer, 0..buffer_size)
         .texture_view(texture)
         .sampler(sampler)
         .buffer::<Uniforms>(uniform_buffer, 0..1)
@@ -526,9 +478,7 @@ fn create_pipeline_layout(
     bind_group_layout: &wgpu::BindGroupLayout,
 ) -> wgpu::PipelineLayout {
     let desc = wgpu::PipelineLayoutDescriptor {
-        label: None,
         bind_group_layouts: &[&bind_group_layout],
-        push_constant_ranges: &[],
     };
     device.create_pipeline_layout(&desc)
 }
@@ -543,7 +493,7 @@ fn create_render_pipeline(
     wgpu::RenderPipelineBuilder::from_layout(layout, vs_mod)
         .fragment_shader(fs_mod)
         .color_format(Frame::TEXTURE_FORMAT)
-        .add_vertex_buffer::<Vertex>(&wgpu::vertex_attr_array![0 => Float32x2])
+        .add_vertex_buffer::<Vertex>(&wgpu::vertex_attr_array![0 => Float2])
         .sample_count(sample_count)
         .primitive_topology(wgpu::PrimitiveTopology::TriangleStrip)
         .build(device)
@@ -581,10 +531,9 @@ fn create_compute_bind_group(
     buffer_size: wgpu::BufferAddress,
     uniform_buffer: &wgpu::Buffer,
 ) -> wgpu::BindGroup {
-    let buffer_size_bytes = std::num::NonZeroU64::new(buffer_size).unwrap();
     wgpu::BindGroupBuilder::new()
-        .buffer_bytes(position_buffer, 0, Some(buffer_size_bytes))
-        .buffer_bytes(velocity_buffer, 0, Some(buffer_size_bytes))
+        .buffer_bytes(position_buffer, 0..buffer_size)
+        .buffer_bytes(velocity_buffer, 0..buffer_size)
         .buffer::<Uniforms>(uniform_buffer, 0..1)
         .build(device, layout)
 }
@@ -594,9 +543,7 @@ fn create_compute_pipeline_layout(
     bind_group_layout: &wgpu::BindGroupLayout,
 ) -> wgpu::PipelineLayout {
     device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("compute-pipeline-layout"),
         bind_group_layouts: &[&bind_group_layout],
-        push_constant_ranges: &[],
     })
 }
 
@@ -605,30 +552,20 @@ fn create_compute_pipeline(
     layout: &wgpu::PipelineLayout,
     cs_mod: &wgpu::ShaderModule,
 ) -> wgpu::ComputePipeline {
-    let desc = wgpu::ComputePipelineDescriptor {
-        label: Some("compute-pipeline"),
-        layout: Some(layout),
+    let compute_stage = wgpu::ProgrammableStageDescriptor {
         module: &cs_mod,
         entry_point: "main",
+    };
+    let desc = wgpu::ComputePipelineDescriptor {
+        layout,
+        compute_stage,
     };
     device.create_compute_pipeline(&desc)
 }
 
-pub fn copy_texture(
-    device: &wgpu::Device,
-    encoder: &mut wgpu::CommandEncoder,
-    src: &wgpu::Texture,
-    dst: &wgpu::Texture,
-) {
-    println!(
-        "wgpu::COPY_BYTES_PER_ROW_ALIGNMENT: {:?}",
-        wgpu::COPY_BYTES_PER_ROW_ALIGNMENT,
-    );
-    let buffer = src.to_buffer(device, encoder);
-    println!(
-        "buffer width: {:?}, height: {:?}",
-        buffer.width(),
-        buffer.height()
-    );
-    buffer.encode_copy_into(encoder, dst);
+pub fn copy_texture(encoder: &mut wgpu::CommandEncoder, src: &wgpu::Texture, dst: &wgpu::Texture) {
+    let src_copy_view = src.default_copy_view();
+    let dst_copy_view = dst.default_copy_view();
+    let copy_size = dst.extent();
+    encoder.copy_texture_to_texture(src_copy_view, dst_copy_view, copy_size);
 }
