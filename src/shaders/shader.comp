@@ -11,9 +11,7 @@ precision mediump float;
 layout(local_size_x = 1) in;
 
 layout(set = 0, binding = 0) buffer PositionBuffer { vec2[] positions; };
-
 layout(set = 0, binding = 1) buffer VelocityBuffer { vec2[] velocities; };
-
 layout(set = 0, binding = 2) uniform Uniforms {
     uint particle_count;
     float width;
