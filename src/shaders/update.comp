@@ -110,7 +110,9 @@ void main() {
     vec2 velocity = velocities[index];
 
     // use noise as angle to generate displacement vector
-    float noise_val = perlin_noise(vec3(position, time * 0.01)) * TAU;
+    vec2 resolution = vec2(width, height);
+    float noise_val =
+        perlin_noise(vec3(position + resolution * 0.5, time * 0.01)) * TAU;
     vec2 displacement = vec2(cos(noise_val), sin(noise_val));
 
     velocity += displacement;
