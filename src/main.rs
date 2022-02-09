@@ -23,7 +23,7 @@ struct Model {
 
 const WIDTH: u32 = 960;
 const HEIGHT: u32 = 540;
-const PARTICLE_COUNT: u32 = 5000;
+const PARTICLE_COUNT: u32 = 3000;
 
 fn main() {
     nannou::app(model).update(update).run();

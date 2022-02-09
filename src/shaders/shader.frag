@@ -23,6 +23,21 @@ layout(set = 0, binding = 3) uniform Uniforms {
     float range;
 };
 
+void debug(vec2 position) {
+    const float particle_size = 2.0;
+    vec3 color = vec3(0.0);
+
+    for (uint i = 0; i < particle_count; i++) {
+        vec2 particle_position = positions[i];
+        vec2 diff = abs(position - particle_position);
+        float d = length(diff);
+        float v = smoothstep(particle_size + 0.5, particle_size, d);
+        color += v;
+    }
+
+    f_color = vec4(color, 1.0);
+}
+
 void main() {
     vec3 color = texture(sampler2D(tex, tex_sampler), tex_coords).rgb;
     float current = (color.r + color.g + color.b) / 3.0;
@@ -33,15 +48,14 @@ void main() {
     position.y = 1.0 - position.y;
     position -= 0.5;
     position *= vec2(width, height);
-
-    float hwidth = width * 0.5;
-    float hheight = height * 0.5;
+    // debug(position);
+    // return;
 
     // check if a particle is on the pixel 
     bool has_particle = false;
     for (uint i = 0; i < particle_count; i++) {
         vec2 particle_position = positions[i];
-        vec2 diff = abs(position - particle_position);
+        vec2 diff = position - particle_position;
 
         if (length(diff) < range) {
             has_particle = true;
@@ -51,7 +65,7 @@ void main() {
 
     if (has_particle && current <= limitation_threshold) {
         // make position nonnegative
-        position += vec2(hwidth, hheight);
+        position += vec2(width, height) * 0.5;
 
         // sum neighboring pixels
         vec3 sum = vec3(0.0);
@@ -59,6 +73,7 @@ void main() {
             for (int y = -1; y < 2; y++) {
                 vec2 coord = position + vec2(x, y);
                 coord /= vec2(width, height);
+                coord.y = 1.0 - coord.y;
                 sum += texture(sampler2D(tex, tex_sampler), coord).rgb;
             }
         }
