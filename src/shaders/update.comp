@@ -111,8 +111,9 @@ void main() {
 
     // use noise as angle to generate displacement vector
     vec2 resolution = vec2(width, height);
-    float noise_val = perlin_noise(vec3(position, time * 0.01)) * TAU;
-    vec2 displacement = vec2(cos(noise_val), sin(noise_val));
+    float noise_val =
+        (perlin_noise(vec3(position * 0.1, time * 0.1)) * 2.0 - 1.0) * TAU;
+    vec2 displacement = vec2(sin(noise_val), cos(noise_val));
     velocity += displacement;
 
     float mag = min(length(velocity), 1.0);

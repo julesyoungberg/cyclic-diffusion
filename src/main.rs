@@ -96,12 +96,12 @@ fn model(app: &App) -> Model {
     println!("drawing initial design");
     draw.reset();
     draw.background().color(BLACK);
-    draw.ellipse().x_y(0.0, 0.0).radius(20.0).color(WHITE);
-    // draw.line()
-    //     .start(pt2(0.0, HEIGHT as f32 * 0.3))
-    //     .end(pt2(0.0, HEIGHT as f32 * -0.3))
-    //     .weight(4.0)
-    //     .color(WHITE);
+    // draw.ellipse().x_y(0.0, 0.0).radius(20.0).color(WHITE);
+    draw.line()
+        .start(pt2(0.0, HEIGHT as f32 * 0.3))
+        .end(pt2(0.0, HEIGHT as f32 * -0.3))
+        .weight(4.0)
+        .color(WHITE);
 
     // Render our drawing to the texture.
     println!("rendering");
