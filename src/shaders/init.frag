@@ -68,10 +68,10 @@ void main() {
 
     vec3 color = vec3(0.0);
 
-    // color = circle(st); // + circle(st - vec2(0.2, 0.0)) + circle(st + vec2(0.2, 0.0));
+    color = circle(st); // + circle(st - vec2(0.2, 0.0)) + circle(st + vec2(0.2, 0.0));
     // color = square(st);
     // color = triangle(st);
-    color = vertical_line(st);
+    // color = vertical_line(st);
 
     f_color = vec4(color, 1.0);
 }

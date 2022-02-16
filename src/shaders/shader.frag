@@ -21,7 +21,7 @@ layout(set = 0, binding = 3) uniform Uniforms {
 
 #define PI 3.14159265359
 
-const float uv_displacement = 0.001;
+const float uv_displacement = 0.002;
 const float threshold = 0.1;
 const float limitation_threshold = 0.01;
 const float decay = 0.98;
