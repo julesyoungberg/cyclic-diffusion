@@ -9,10 +9,6 @@ pub struct Uniforms {
     pub width: float,
     pub height: float,
     pub time: float,
-    pub threshold: float,
-    pub limitation_threshold: float,
-    pub decay: float,
-    pub bin_size: float,
 }
 
 impl Uniforms {
@@ -22,10 +18,6 @@ impl Uniforms {
             width,
             height,
             time,
-            threshold: 0.8,
-            limitation_threshold: 0.001,
-            decay: 0.97,
-            bin_size: 2.0,
         }
     }
 }

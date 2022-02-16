@@ -17,13 +17,9 @@ layout(set = 0, binding = 2) uniform Uniforms {
     float width;
     float height;
     float time;
-    float threshold;
-    float limitation_threshold;
-    float decay;
-    float range;
 };
 
-#define TAU 6.2831853072
+#define PI 3.1415926536
 
 // Classic Perlin 3D Noise
 // by Stefan Gustavson
@@ -112,7 +108,7 @@ void main() {
     // use noise as angle to generate displacement vector
     vec2 resolution = vec2(width, height);
     float noise_val =
-        (perlin_noise(vec3(position * 0.1, time * 0.1)) * 2.0 - 1.0) * TAU;
+        (perlin_noise(vec3(position, time * 0.1)) * 2.0 - 1.0) * PI;
     vec2 displacement = vec2(sin(noise_val), cos(noise_val));
     velocity += displacement;
 
